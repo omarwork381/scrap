@@ -51,7 +51,9 @@ async def graceful_shutdown():
     print("Bot has been stopped successfully")
 
 async def scrape_mostaql_projects():
+    
     options = Options()
+    options.add_argument("--headless")
     options.headless = True
 
     title_list = []
