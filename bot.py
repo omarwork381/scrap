@@ -6,14 +6,16 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.firefox.options import Options
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
+import sys
 
 TELEGRAM_TOKEN = '7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI'
 bot = Bot(token=TELEGRAM_TOKEN)
 
 active_users = set()
-# إضافة متغير للتحكم في حلقة التشغيل الرئيسية
-running = True
 monitoring_active = True
+application = None
+# إضافة Event للتحكم في دورة حياة التطبيق
+shutdown_event = asyncio.Event()
 
 async def send_message(chat_id, message):
     await bot.send_message(chat_id=chat_id, text=message)
@@ -31,6 +33,21 @@ async def monitor_resources():
         except Exception as e:
             print(f"Error in resource monitoring: {e}")
             await asyncio.sleep(10)
+
+async def graceful_shutdown():
+    """دالة لإيقاف البوت بشكل آمن"""
+    global monitoring_active, application
+    print("بدء عملية الإيقاف...")
+    monitoring_active = False
+    
+    if application:
+        await application.stop()
+        await application.shutdown()
+    
+    # تفعيل حدث الإيقاف
+    shutdown_event.set()
+    
+    print("تم إيقاف البوت بنجاح")
 
 async def scrape_mostaql_projects():
     options = Options()
@@ -101,6 +118,11 @@ async def scrape_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await scrape_mostaql_projects()
         await update.message.reply_text("تم جلب المشاريع بنجاح!")
+        # إضافة رسالة إخبارية قبل الإيقاف
+        await update.message.reply_text("سيتم إيقاف البوت الآن...")
+        # جدولة الإيقاف بعد إرسال الرسالة
+        await asyncio.sleep(2)  # انتظار قصير للتأكد من إرسال الرسالة
+        await graceful_shutdown()
     except Exception as e:
         await update.message.reply_text(f"حدث خطأ أثناء جلب المشاريع: {e}")
 
@@ -112,26 +134,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("أنت بالفعل مسجل.")
 
-async def shutdown(application: Application):
-    """دالة التنظيف التي سيتم استدعاؤها قبل إيقاف التشغيل"""
-    global monitoring_active, running
-    monitoring_active = False
-    running = False
-    await application.stop()
-    await application.shutdown()
-
-# إضافة دالة للتعامل مع إشارات النظام
-def signal_handler():
-    global running
-    running = False
-
 async def main():
-    global running
-    
-    # إعداد معالج الإشارات
-    import signal
-    signal.signal(signal.SIGINT, lambda s, f: signal_handler())
-    signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
+    global application
     
     # إعداد التطبيق
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -149,20 +153,26 @@ async def main():
         await application.start()
         await application.updater.start_polling()
         
-        # استخدام حلقة مخصصة بدلاً من idle()
-        while running:
-            await asyncio.sleep(1)
-            
+        # انتظار حتى يتم تفعيل حدث الإيقاف
+        await shutdown_event.wait()
+        
     except Exception as e:
         print(f"Error in main loop: {e}")
     finally:
-        # التنظيف عند إيقاف التطبيق
-        await shutdown(application)
+        # إلغاء مهمة المراقبة
         monitor_task.cancel()
         try:
             await monitor_task
         except asyncio.CancelledError:
             pass
+        
+        # إيقاف التطبيق إذا لم يتم إيقافه بالفعل
+        if application:
+            try:
+                await application.stop()
+                await application.shutdown()
+            except Exception as e:
+                print(f"Error during shutdown: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
