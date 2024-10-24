@@ -23,4 +23,9 @@ jobs:
 
     - name: Run scraping bot
       run: |
-        python telegram-bot-code.py  # تأكد من استبدال your_script.py باسم سكريبت البايثون الخاص بك
+        python bot.py  # تأكد من استبدال your_script.py باسم سكريبت البايثون الخاص بك
+    - name: Clean up
+      if: always()  # تنظيف العمليات بعد الانتهاء
+      run: |
+        pkill -f firefox || true
+        pkill -f geckodriver || true
