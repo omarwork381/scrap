@@ -11,7 +11,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Get token from environment variable
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN = os.getenv('7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI')
 if not TELEGRAM_TOKEN:
     raise ValueError("No TELEGRAM_TOKEN found in environment variables")
 
