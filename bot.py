@@ -1,191 +1,50 @@
 import asyncio
-import psutil
+import time
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.firefox.options import Options
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot, Update
+from telegram.ext import ApplicationBuilder, CommandHandler
+import pandas as pd
 
 # Telegram bot token
-TELEGRAM_TOKEN = '7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI'
+TELEGRAM_TOKEN = '7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI'  # Replace with your bot token
 bot = Bot(token=TELEGRAM_TOKEN)
 
-active_users = set()
-monitoring_active = True
-application = None
+# Global variable to store user chat IDs
+chat_ids = set()
 
-# Event to control shutdown
-shutdown_event = asyncio.Event()
-
-async def send_message(chat_id, message):
-    await bot.send_message(chat_id=chat_id, text=message)
-import asyncio
-import psutil
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
-from selenium.webdriver.firefox.options import Options
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
-
-# Telegram bot token from environment variable
-TELEGRAM_TOKEN = 'YOUR_TELEGRAM_TOKEN'
-bot = Bot(token=TELEGRAM_TOKEN)
-
-active_users = set()
-monitoring_active = True
-application = None
-shutdown_event = asyncio.Event()
-
-# Function to send messages to Telegram
-async def send_message(chat_id, message):
-    await bot.send_message(chat_id=chat_id, text=message)
-
-# Resource monitoring routine
-async def monitor_resources():
-    while monitoring_active:
-        cpu_usage = psutil.cpu_percent()
-        memory_info = psutil.virtual_memory()
-        memory_usage = memory_info.percent
-        print(f"CPU Usage: {cpu_usage}% | Memory Usage: {memory_usage}%")
-        await asyncio.sleep(10)
-
-async def graceful_shutdown():
-    global monitoring_active, application
-    monitoring_active = False
-    if application:
-        await application.stop()
-        await application.shutdown()
-    shutdown_event.set()
-
-async def scrape_mostaql_projects():
-    options = Options()
-    options.headless = True
-    title_list, project_list, price_list, time_list, links_list = [], [], [], [], []
-
-    try:
-        with webdriver.Firefox(options=options) as driver:
-            url = 'https://mostaql.com/projects'
-            driver.get(url)
-
-            for scrap in range(1, 16):
-                try:
-                    row = driver.find_element(By.XPATH, f'(//h2)[{scrap}]')
-                    link = row.find_element(By.XPATH, './a')
-                    alink = link.get_attribute('href')
-                    link.click()
-
-                    await asyncio.sleep(2)
-
-                    title = driver.find_element(By.TAG_NAME, 'h1').text
-                    project = driver.find_element(By.XPATH, '//*[@id="project-brief-panel"]').text
-                    price = driver.find_element(By.CSS_SELECTOR, '#project-meta-panel > div:nth-child(1) > table > tbody > tr:nth-child(3) > td:nth-child(2) > span').text
-                    time_value = driver.find_element(By.CSS_SELECTOR, '#project-meta-panel > div:nth-child(1) > table > tbody > tr:nth-child(4) > td:nth-child(2)').text
-
-                    title_list.append(title)
-                    project_list.append(project)
-                    price_list.append(price)
-                    time_list.append(time_value)
-                    links_list.append(alink)
-
-                    driver.back()
-                    await asyncio.sleep(2)
-
-                except NoSuchElementException:
-                    continue
-
-        for i in range(len(title_list)):
-            message_body = (
-                f"New Project:\n"
-                f"Title: {title_list[i]}\n"
-                f"Description: {project_list[i]}\n"
-                f"Price: {price_list[i]}\n"
-                f"Duration: {time_list[i]}\n"
-                f"Link: {links_list[i]}"
-            )
-            for chat_id in active_users:
-                await send_message(chat_id, message_body)
-
-    except Exception as e:
-        print(f"Error in scraping: {e}")
-
-async def scrape_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Command to start and register a user's chat ID
+async def start(update: Update, context):
     chat_id = update.message.chat_id
-    await update.message.reply_text("Fetching projects from Mostaql...")
+    chat_ids.add(chat_id)
+    await update.message.reply_text("You're now registered! Use /scrape to start scraping projects.")
 
-    try:
-        await scrape_mostaql_projects()
-        await update.message.reply_text("Projects fetched successfully!")
-        await graceful_shutdown()
-    except Exception as e:
-        await update.message.reply_text(f"Error occurred while fetching projects: {e}")
+# Command to scrape data and send to users, and stop the bot after sending messages
+async def scrape(update: Update, context):
+    await update.message.reply_text("Starting to scrape projects, please wait...")
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
-    if chat_id not in active_users:
-        active_users.add(chat_id)
-        await update.message.reply_text("Welcome! You have been successfully registered to receive projects.")
-    else:
-        await update.message.reply_text("You are already registered.")
+    # Scrape the projects
+    scraped_data = await scrape_projects()
 
-async def main():
-    global application
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("scrape", scrape_command))
+    # Send the scraped data to all registered users
+    for chat_id in chat_ids:
+        for message_body in scraped_data:
+            await bot.send_message(chat_id=chat_id, text=message_body)
+            print(f"Message sent to Telegram chat_id: {chat_id}")
 
-    monitor_task = asyncio.create_task(monitor_resources())
-    
-    try:
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-        await shutdown_event.wait()
-    finally:
-        monitor_task.cancel()
-        if application:
-            await application.stop()
-            await application.shutdown()
+    # Stop the bot after sending messages
+    await context.application.stop()
+    print("Bot has stopped after sending messages.")
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
-async def monitor_resources():
-    while monitoring_active:
-        try:
-            cpu_usage = psutil.cpu_percent()
-            memory_info = psutil.virtual_memory()
-            memory_usage = memory_info.percent
-            print(f"CPU Usage: {cpu_usage}% | Memory Usage: {memory_usage}%")
-            await asyncio.sleep(10)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            print(f"Error in resource monitoring: {e}")
-            await asyncio.sleep(10)
-
-async def graceful_shutdown():
-    """Graceful shutdown for bot"""
-    global monitoring_active, application
-    print("Starting shutdown process...")
-    monitoring_active = False
-    
-    if application:
-        await application.stop()
-        await application.shutdown()
-    
-    # Trigger shutdown event
-    shutdown_event.set()
-    
-    print("Bot has been stopped successfully")
-
-async def scrape_mostaql_projects():
-    
+async def scrape_projects():
     options = Options()
     options.add_argument("--headless")
-    options.headless = True
+    driver = webdriver.Firefox(options=options)
+
+    url = 'https://mostaql.com/projects'
+    driver.get(url)
 
     title_list = []
     project_list = []
@@ -193,118 +52,55 @@ async def scrape_mostaql_projects():
     time_list = []
     links_list = []
 
-    try:
-        with webdriver.Firefox(options=options) as driver:
-            url = 'https://mostaql.com/projects'
-            driver.get(url)
-
-            for scrap in range(1, 16):
-                try:
-                    row = driver.find_element(By.XPATH, f'(//h2)[{scrap}]')
-                    link = row.find_element(By.XPATH, './a')
-                    alink = link.get_attribute('href')
-                    link.click()
-
-                    await asyncio.sleep(2)
-
-                    title = driver.find_element(By.TAG_NAME, 'h1').text
-                    project = driver.find_element(By.XPATH, '//*[@id="project-brief-panel"]').text
-                    price = driver.find_element(By.CSS_SELECTOR, '#project-meta-panel > div:nth-child(1) > table > tbody > tr:nth-child(3) > td:nth-child(2) > span').text
-                    time_value = driver.find_element(By.CSS_SELECTOR, '#project-meta-panel > div:nth-child(1) > table > tbody > tr:nth-child(4) > td:nth-child(2)').text
-                    
-                    title_list.append(title)
-                    project_list.append(project)
-                    price_list.append(price)
-                    time_list.append(time_value)
-                    links_list.append(alink)
-
-                    driver.back()
-                    await asyncio.sleep(2)
-
-                except NoSuchElementException as e:
-                    print(f'Element not found for scrap {scrap}: {e}')
-                    continue
-
-        # Send results to Telegram
-        for i in range(len(title_list)):
-            message_body = (
-                f"New Project:\n"
-                f"Title: {title_list[i]}\n"
-                f"Description: {project_list[i]}\n"
-                f"Price: {price_list[i]}\n"
-                f"Duration: {time_list[i]}\n"
-                f"Link: {links_list[i]}"
-            )
-            
-            for chat_id in active_users:
-                await send_message(chat_id, message_body)
-                print(f"Message sent to chat_id: {chat_id}")
-
-    except Exception as e:
-        print(f"Error in scraping: {e}")
-        raise
-
-async def scrape_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
-    await update.message.reply_text("Fetching projects from Mostaql...")
-
-    try:
-        await scrape_mostaql_projects()
-        await update.message.reply_text("Projects fetched successfully!")
-        # Notify shutdown
-        await update.message.reply_text("Bot will be shut down now...")
-        await asyncio.sleep(2)  # Short wait to ensure the message is sent
-        await graceful_shutdown()
-    except Exception as e:
-        await update.message.reply_text(f"Error occurred while fetching projects: {e}")
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
-    if chat_id not in active_users:
-        active_users.add(chat_id)
-        await update.message.reply_text("Welcome! You have been successfully registered to receive projects.")
-    else:
-        await update.message.reply_text("You are already registered.")
-
-async def main():
-    global application
-    
-    # Initialize application
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("scrape", scrape_command))
-
-    # Start resource monitoring task
-    monitor_task = asyncio.create_task(monitor_resources())
-    
-    try:
-        # Initialize and start the application
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-        
-        # Wait for shutdown event
-        await shutdown_event.wait()
-        
-    except Exception as e:
-        print(f"Error in main loop: {e}")
-    finally:
-        # Cancel monitoring task
-        monitor_task.cancel()
+    for scrap in range(1, 11):
         try:
-            await monitor_task
-        except asyncio.CancelledError:
-            pass
-        
-        # Stop the application if not already stopped
-        if application:
-            try:
-                await application.stop()
-                await application.shutdown()
-            except Exception as e:
-                print(f"Error during shutdown: {e}")
+            row = driver.find_element(By.XPATH, f'(//h2)[{scrap}]')
+            link = row.find_element(By.XPATH, './a')
+            alink = link.getAttribute('href')
+            link.click()
+
+            time.sleep(2)  # Consider using WebDriverWait for better performance
+            title = driver.find_element(By.TAG_NAME, 'h1').text
+            project = driver.find_element(By.XPATH, '//*[@id="project-brief-panel"]').text
+            price = driver.find_element(By.CSS_SELECTOR, '#project-meta-panel > div:nth-child(1) > table > tbody > tr:nth-child(3) > td:nth-child(2) > span').text
+            time_value = driver.find_element(By.CSS_SELECTOR, '#project-meta-panel > div:nth-child(1) > table > tbody > tr:nth-child(4) > td:nth-child(2)').text
+            
+            title_list.append(title)
+            project_list.append(project)
+            price_list.append(price)
+            time_list.append(time_value)
+            links_list.append(alink)
+            driver.back()
+
+        except NoSuchElementException:
+            print(f'Element not found for scrap {scrap}')
+            continue
+
+    driver.quit()
+
+    # Compile messages for Telegram
+    messages = []
+    for i in range(len(title_list)):
+        message_body = (f"مشروع جديد: \nالعنوان: {title_list[i]}\nالوصف: {project_list[i]}"
+                        f"\nالسعر: {price_list[i]}\nالمدة: {time_list[i]}\nالرابط: {links_list[i]}")
+        messages.append(message_body)
+
+    return messages
+
+# Main function to start the bot and command handlers
+async def main():
+    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Register command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("scrape", scrape))
+
+    # Start the bot
+    await application.start()
+    await application.updater.start_polling()
+
+    # Block until the application is stopped
+    await application.wait_for_shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
