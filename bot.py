@@ -8,7 +8,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Telegram bot token
-TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+TELEGRAM_TOKEN = '7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI'
 bot = Bot(token=TELEGRAM_TOKEN)
 
 active_users = set()
