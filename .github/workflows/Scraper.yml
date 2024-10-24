@@ -1,0 +1,56 @@
+name: Mostaql Projects Scraper
+
+on:
+  schedule:
+    # كل 6 ساعات
+    - cron: '0 */6 * * *'
+  # يسمح بالتشغيل اليدوي
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+
+    - name: Install Firefox
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y firefox
+
+    - name: Install Firefox GeckoDriver
+      run: |
+        wget https://github.com/mozilla/geckodriver/releases/download/v0.33.0/geckodriver-v0.33.0-linux64.tar.gz
+        tar -xzf geckodriver-v0.33.0-linux64.tar.gz
+        sudo mv geckodriver /usr/local/bin/
+        sudo chmod +x /usr/local/bin/geckodriver
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install selenium
+        pip install python-telegram-bot
+        pip install psutil
+        pip install asyncio
+
+    - name: Run bot
+      run: |
+        python your_bot_file.py
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: bot-logs
+        path: |
+          ./*.log
+          geckodriver.log
