@@ -13,7 +13,9 @@ bot = Bot(token=TELEGRAM_TOKEN)
 
 active_users = set()
 monitoring_active = True
-application = None  # جعل التطبيق متغيراً عالمياً
+application = None
+# إضافة Event للتحكم في دورة حياة التطبيق
+shutdown_event = asyncio.Event()
 
 async def send_message(chat_id, message):
     await bot.send_message(chat_id=chat_id, text=message)
@@ -42,9 +44,10 @@ async def graceful_shutdown():
         await application.stop()
         await application.shutdown()
     
+    # تفعيل حدث الإيقاف
+    shutdown_event.set()
+    
     print("تم إيقاف البوت بنجاح")
-    # إنهاء البرنامج بشكل آمن
-    sys.exit(0)
 
 async def scrape_mostaql_projects():
     options = Options()
@@ -118,7 +121,8 @@ async def scrape_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # إضافة رسالة إخبارية قبل الإيقاف
         await update.message.reply_text("سيتم إيقاف البوت الآن...")
         # جدولة الإيقاف بعد إرسال الرسالة
-        asyncio.create_task(graceful_shutdown())
+        await asyncio.sleep(2)  # انتظار قصير للتأكد من إرسال الرسالة
+        await graceful_shutdown()
     except Exception as e:
         await update.message.reply_text(f"حدث خطأ أثناء جلب المشاريع: {e}")
 
@@ -149,8 +153,8 @@ async def main():
         await application.start()
         await application.updater.start_polling()
         
-        # انتظار حتى يتم إيقاف التطبيق
-        await application.updater.wait_closed()
+        # انتظار حتى يتم تفعيل حدث الإيقاف
+        await shutdown_event.wait()
         
     except Exception as e:
         print(f"Error in main loop: {e}")
@@ -161,6 +165,14 @@ async def main():
             await monitor_task
         except asyncio.CancelledError:
             pass
+        
+        # إيقاف التطبيق إذا لم يتم إيقافه بالفعل
+        if application:
+            try:
+                await application.stop()
+                await application.shutdown()
+            except Exception as e:
+                print(f"Error during shutdown: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
