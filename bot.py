@@ -1,8 +1,3 @@
-The code you've provided is a Telegram bot that uses Selenium to scrape project listings from a site called "Mostaql". In order to ensure that the bot runs and listens for the `/scrape` command, and then shuts down until another `/scrape` command is received, you can implement an event loop that waits for the command and manages the lifecycle of the Selenium browser instance as well as the Telegram bot.
-
-Here’s how you can refine your existing code for better management of the bot's lifecycle and command handling:
-
-```python
 import asyncio
 import psutil
 from selenium import webdriver
@@ -11,14 +6,16 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.firefox.options import Options
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
-import sys
 
-TELEGRAM_TOKEN = '7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI'  # Replace with your actual token
+# Telegram bot token
+TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
 bot = Bot(token=TELEGRAM_TOKEN)
 
 active_users = set()
 monitoring_active = True
 application = None
+
+# Event to control shutdown
 shutdown_event = asyncio.Event()
 
 async def send_message(chat_id, message):
@@ -38,9 +35,23 @@ async def monitor_resources():
             print(f"Error in resource monitoring: {e}")
             await asyncio.sleep(10)
 
+async def graceful_shutdown():
+    """Graceful shutdown for bot"""
+    global monitoring_active, application
+    print("Starting shutdown process...")
+    monitoring_active = False
+    
+    if application:
+        await application.stop()
+        await application.shutdown()
+    
+    # Trigger shutdown event
+    shutdown_event.set()
+    
+    print("Bot has been stopped successfully")
+
 async def scrape_mostaql_projects():
     options = Options()
-    options.add_argument("--headless")
     options.headless = True
 
     title_list = []
@@ -81,14 +92,15 @@ async def scrape_mostaql_projects():
                     print(f'Element not found for scrap {scrap}: {e}')
                     continue
 
+        # Send results to Telegram
         for i in range(len(title_list)):
             message_body = (
-                f"مشروع جديد: \n"
-                f"العنوان: {title_list[i]}\n"
-                f"الوصف: {project_list[i]}\n"
-                f"السعر: {price_list[i]}\n"
-                f"المدة: {time_list[i]}\n"
-                f"الرابط: {links_list[i]}"
+                f"New Project:\n"
+                f"Title: {title_list[i]}\n"
+                f"Description: {project_list[i]}\n"
+                f"Price: {price_list[i]}\n"
+                f"Duration: {time_list[i]}\n"
+                f"Link: {links_list[i]}"
             )
             
             for chat_id in active_users:
@@ -97,69 +109,69 @@ async def scrape_mostaql_projects():
 
     except Exception as e:
         print(f"Error in scraping: {e}")
+        raise
 
 async def scrape_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
-    await update.message.reply_text("جاري جلب المشاريع من مستقل...")
+    await update.message.reply_text("Fetching projects from Mostaql...")
 
     try:
         await scrape_mostaql_projects()
-        await update.message.reply_text("تم جلب المشاريع بنجاح!")
-        await graceful_shutdown()  # Invoke shutdown after scraping
+        await update.message.reply_text("Projects fetched successfully!")
+        # Notify shutdown
+        await update.message.reply_text("Bot will be shut down now...")
+        await asyncio.sleep(2)  # Short wait to ensure the message is sent
+        await graceful_shutdown()
     except Exception as e:
-        await update.message.reply_text(f"حدث خطأ أثناء جلب المشاريع: {e}")
+        await update.message.reply_text(f"Error occurred while fetching projects: {e}")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     if chat_id not in active_users:
         active_users.add(chat_id)
-        await update.message.reply_text("مرحبًا بك! تم تسجيلك بنجاح لاستلام المشاريع.")
+        await update.message.reply_text("Welcome! You have been successfully registered to receive projects.")
     else:
-        await update.message.reply_text("أنت بالفعل مسجل.")
-
-async def graceful_shutdown():
-    global monitoring_active
-    print("بدء عملية الإيقاف...")
-    monitoring_active = False
-    shutdown_event.set()
-    print("تم إيقاف البوت بنجاح")
+        await update.message.reply_text("You are already registered.")
 
 async def main():
     global application
+    
+    # Initialize application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
+    # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("scrape", scrape_command))
 
-    # Start resource monitoring
+    # Start resource monitoring task
     monitor_task = asyncio.create_task(monitor_resources())
     
     try:
+        # Initialize and start the application
         await application.initialize()
         await application.start()
         await application.updater.start_polling()
         
-        await shutdown_event.wait()  # Wait for shutdown event
-
+        # Wait for shutdown event
+        await shutdown_event.wait()
+        
     except Exception as e:
         print(f"Error in main loop: {e}")
     finally:
-        # Cancel monitor task
+        # Cancel monitoring task
         monitor_task.cancel()
-        await monitor_task  # Ensure it has finished
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+        
+        # Stop the application if not already stopped
         if application:
-            await application.stop()
-            await application.shutdown()
+            try:
+                await application.stop()
+                await application.shutdown()
+            except Exception as e:
+                print(f"Error during shutdown: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
-
-### Key Changes:
-1. **Graceful Shutdown**: The `graceful_shutdown()` function now stops the resource monitoring and sets the shutdown event.
-2. **Lifecycle Management**: The bot starts and waits for the shutdown event, allowing it to end cleanly after scraping.
-3. **Error Handling**: Added try-except blocks to capture errors during bot operations.
-
-### Note:
-- Make sure to replace `'your_telegram_token_here'` with your actual Telegram bot token.
-- For continuous operation using GitHub Actions or similar, ensure your bot's environment supports persistent connections and the necessary libraries (like `selenium` and `psutil`).
