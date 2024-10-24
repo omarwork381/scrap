@@ -23,4 +23,4 @@ jobs:
 
     - name: Run Telegram Bot
       run: |
-        python -u telegram-bot-code.py > output.log 2>&1 # Run your script directly
+        python  telegram-bot-code.py 
