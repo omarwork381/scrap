@@ -22,7 +22,5 @@ jobs:
         pip install -r requirements.txt  # إذا كان لديك ملف requirements.txt
 
     - name: Run scraping bot
-      env:
-        TELEGRAM_TOKEN: ${{ secrets.7908485758:AAF4FFhU3LYxm6y9Pe7VSU-jjTqRLH3NORI }}  # يمكنك وضع توكن البوت في Secrets
       run: |
         python bot.py  # تأكد من استبدال your_script.py باسم سكريبت البايثون الخاص بك
